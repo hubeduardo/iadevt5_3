@@ -1,77 +1,55 @@
-import { FormEvent, useState } from 'react';
-import { Search, LocateFixed } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import * as React from 'react';
+import { Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-interface WeatherSearchProps {
-  onSearch: (city: string) => void;
-  onUseLocation?: () => void;
-  loading?: boolean;
-  helperMessage?: string | null;
-}
+import { Button } from '@/components/ui/button';
 
 export function WeatherSearch({
   onSearch,
-  onUseLocation,
   loading = false,
-  helperMessage,
-}: WeatherSearchProps) {
-  const [city, setCity] = useState('');
+  hint,
+  className,
+}: {
+  onSearch: (city: string) => void;
+  loading?: boolean;
+  hint?: string;
+  className?: string;
+}) {
+  const [value, setValue] = React.useState('');
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault();
+  function submit() {
+    const city = value.trim();
+    if (!city) return;
     onSearch(city);
   }
 
   return (
-    <section className="rounded-[2rem] border border-white/40 bg-white/25 p-5 shadow-[0_24px_80px_rgba(94,129,172,0.18)] backdrop-blur-xl">
-      <div className="mb-4 flex items-center justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-500">Weather Search</p>
-          <h2 className="mt-1 text-xl font-semibold text-slate-900">Busque qualquer cidade</h2>
-        </div>
-        {onUseLocation ? (
-          <Button
-            type="button"
-            variant="secondary"
-            className="rounded-full bg-white/60 text-slate-700 hover:bg-white"
-            onClick={onUseLocation}
-          >
-            <LocateFixed />
-            Minha localizacao
-          </Button>
-        ) : null}
-      </div>
-
-      <form className="flex flex-col gap-3 sm:flex-row" onSubmit={handleSubmit}>
-        <label className="sr-only" htmlFor="city-search">
-          Digite o nome da cidade
+    <div className={cn('w-full', className)}>
+      <div className="flex gap-2">
+        <label className="flex-1">
+          <span className="sr-only">Cidade</span>
+          <input
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') submit();
+            }}
+            placeholder="Digite uma cidade (ex: São Paulo)"
+            className="h-10 w-full rounded-xl border border-white/20 bg-white/20 px-4 text-sm text-foreground shadow-sm backdrop-blur-md placeholder:text-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            disabled={loading}
+          />
         </label>
-        <input
-          id="city-search"
-          value={city}
-          onChange={(event) => setCity(event.target.value)}
-          placeholder="Ex.: Sao Paulo, Lisboa, Tokyo"
-          className="h-12 flex-1 rounded-full border border-white/50 bg-white/70 px-5 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-200"
-        />
         <Button
-          type="submit"
-          className={cn(
-            'h-12 rounded-full bg-slate-900 px-6 text-white hover:bg-slate-800',
-            loading && 'opacity-80'
-          )}
-          disabled={loading}
+          type="button"
+          onClick={submit}
+          disabled={loading || value.trim().length === 0}
+          className="rounded-xl"
         >
-          <Search />
-          {loading ? 'Buscando...' : 'Buscar'}
+          <Search className="mr-1 size-4" />
+          Buscar
         </Button>
-      </form>
-
-      {helperMessage ? (
-        <p className="mt-3 text-sm text-slate-600">{helperMessage}</p>
-      ) : (
-        <p className="mt-3 text-sm text-slate-500">Use a busca se a geolocalizacao estiver indisponivel ou se quiser trocar de cidade.</p>
-      )}
-    </section>
+      </div>
+      {hint ? <p className="mt-2 text-sm text-foreground/70">{hint}</p> : null}
+    </div>
   );
 }
+

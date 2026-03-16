@@ -1,117 +1,111 @@
-import { useEffect, useRef, useState } from 'react';
-import { Coordinates, WeatherData } from './weather.types';
+import * as React from 'react';
+import type { WeatherData } from './weather.types';
 
-const API_BASE_URL = 'http://localhost:3000/api/weather';
+type Coordinates = { latitude: number; longitude: number };
 
-interface UseWeatherState {
-  data: WeatherData | null;
-  error: string | null;
-  loading: boolean;
-  fetchByCity: (city: string) => Promise<void>;
-  fetchByCoordinates: (latitude: number, longitude: number) => Promise<void>;
-}
+export function useGeolocation() {
+  const [coordinates, setCoordinates] = React.useState<Coordinates | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(false);
 
-interface UseGeolocationState {
-  coordinates: Coordinates | null;
-  error: string | null;
-  loading: boolean;
-  requestPermission: () => void;
-}
-
-async function fetchWeather(query: string): Promise<WeatherData> {
-  const response = await fetch(`${API_BASE_URL}/forecast?${query}`);
-  const payload = (await response.json()) as WeatherData | { error?: string };
-
-  if (!response.ok) {
-    const message = 'error' in payload && typeof payload.error === 'string'
-      ? payload.error
-      : 'Nao foi possivel obter o clima agora.';
-    throw new Error(message);
-  }
-
-  return payload as WeatherData;
-}
-
-export function useWeather(): UseWeatherState {
-  const [data, setData] = useState<WeatherData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  async function runFetch(query: string): Promise<void> {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const nextData = await fetchWeather(query);
-      setData(nextData);
-    } catch (caughtError) {
-      setData(null);
-      setError(caughtError instanceof Error ? caughtError.message : 'Erro inesperado');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function fetchByCity(city: string): Promise<void> {
-    const normalizedCity = city.trim();
-    if (!normalizedCity) {
-      setError('Informe uma cidade para buscar.');
+  const requestPermission = React.useCallback(() => {
+    if (!navigator.geolocation) {
+      setError('Geolocalização não suportada neste navegador.');
       return;
     }
 
-    await runFetch(`city=${encodeURIComponent(normalizedCity)}`);
-  }
+    setLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setCoordinates({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+        setError(null);
+        setLoading(false);
+      },
+      (err) => {
+        setCoordinates(null);
+        setError(err.message || 'Permissão de geolocalização negada.');
+        setLoading(false);
+      },
+      { enableHighAccuracy: false, timeout: 10_000, maximumAge: 60_000 }
+    );
+  }, []);
 
-  async function fetchByCoordinates(latitude: number, longitude: number): Promise<void> {
-    await runFetch(`latitude=${latitude}&longitude=${longitude}`);
+  return { coordinates, error, loading, requestPermission };
+}
+
+type WeatherError = { message: string; status?: number };
+
+function getApiBaseUrl(): string {
+  // Allows local dev without editing Vite proxy config.
+  // Example: VITE_API_BASE_URL=http://localhost:3000
+  const base = import.meta.env.VITE_API_BASE_URL as string | undefined;
+  return base?.replace(/\/+$/, '') ?? '';
+}
+
+async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(url, { signal });
+  if (!res.ok) {
+    let details: unknown = undefined;
+    try {
+      details = await res.json();
+    } catch {
+      // ignore
+    }
+    const err: WeatherError = { message: 'Erro ao buscar clima.', status: res.status };
+    if (details && typeof details === 'object' && 'error' in (details as Record<string, unknown>)) {
+      err.message = String((details as Record<string, unknown>).error);
+    }
+    throw err;
   }
+  return (await res.json()) as T;
+}
+
+export function useWeather() {
+  const [data, setData] = React.useState<WeatherData | null>(null);
+  const [error, setError] = React.useState<WeatherError | null>(null);
+  const [loading, setLoading] = React.useState(false);
+
+  const abortRef = React.useRef<AbortController | null>(null);
+
+  const run = React.useCallback(async (url: string) => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await fetchJson<WeatherData>(url, controller.signal);
+      setData(result);
+    } catch (e) {
+      setData(null);
+      const err = (e && typeof e === 'object' && 'message' in (e as Record<string, unknown>))
+        ? (e as WeatherError)
+        : ({ message: 'Erro inesperado.' } as WeatherError);
+      setError(err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchByCity = React.useCallback(async (city: string) => {
+    const base = getApiBaseUrl();
+    const url = `${base}/api/weather/forecast?city=${encodeURIComponent(city)}`;
+    await run(url);
+  }, [run]);
+
+  const fetchByCoordinates = React.useCallback(async (latitude: number, longitude: number) => {
+    const base = getApiBaseUrl();
+    const url = `${base}/api/weather/forecast?latitude=${encodeURIComponent(String(latitude))}&longitude=${encodeURIComponent(
+      String(longitude)
+    )}`;
+    await run(url);
+  }, [run]);
+
+  React.useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, []);
 
   return { data, error, loading, fetchByCity, fetchByCoordinates };
 }
 
-export function useGeolocation(autoRequest = true): UseGeolocationState {
-  const [coordinates, setCoordinates] = useState<Coordinates | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(autoRequest);
-  const requestedRef = useRef(false);
-
-  function requestPermission(): void {
-    if (!('geolocation' in navigator)) {
-      setLoading(false);
-      setError('Geolocalizacao indisponivel neste navegador.');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setCoordinates({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        });
-        setLoading(false);
-      },
-      () => {
-        setError('Permissao de localizacao negada. Busque por uma cidade.');
-        setLoading(false);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-      }
-    );
-  }
-
-  useEffect(() => {
-    if (!autoRequest || requestedRef.current) {
-      return;
-    }
-
-    requestedRef.current = true;
-    requestPermission();
-  }, [autoRequest]);
-
-  return { coordinates, error, loading, requestPermission };
-}

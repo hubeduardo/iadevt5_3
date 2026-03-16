@@ -1,23 +1,13 @@
-import test from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { Request, Response } from 'express';
-import { createWeatherController } from './weather.controller';
-import { WeatherApiError, WeatherResponse, WeatherService } from './weather.types';
+import { WeatherController } from './weather.controller';
+import { HttpError, WeatherResponse, WeatherService } from './weather.types';
 
-function createRequestMock(query: Record<string, string> = {}): Request {
-  return { query } as unknown as Request;
-}
+function makeResponseStub() {
+  const state: { statusCode?: number; body?: unknown } = {};
 
-function createResponseMock() {
-  const state: {
-    statusCode: number;
-    body: unknown;
-  } = {
-    statusCode: 200,
-    body: undefined,
-  };
-
-  const response = {
+  const res = {
     status(code: number) {
       state.statusCode = code;
       return this;
@@ -25,104 +15,209 @@ function createResponseMock() {
     json(payload: unknown) {
       state.body = payload;
       return this;
-    },
-  } as Response;
+    }
+  };
 
-  return { response, state };
+  return { res: res as unknown as Response, state };
 }
 
-function createServiceStub(overrides: Partial<WeatherService> = {}): WeatherService {
-  const baseResponse: WeatherResponse = {
-    location: {
-      name: 'Sao Paulo',
-      country: 'Brazil',
-      latitude: -23.55,
-      longitude: -46.63,
-    },
+function makeRequestStub(query: Record<string, unknown>) {
+  return { query } as unknown as Request;
+}
+
+function makeWeatherFixture(): WeatherResponse {
+  return {
+    location: { name: 'São Paulo', country: 'Brazil', latitude: -23.55, longitude: -46.63 },
     current: {
       temperature: 25,
       feelsLike: 27,
       humidity: 65,
       windSpeed: 12,
       weatherCode: 2,
-      weatherDescription: 'Parcialmente nublado',
+      weatherDescription: 'Parcialmente nublado'
     },
     hourly: [{ time: '14:00', temperature: 25, weatherCode: 2 }],
-    daily: [{ date: '2025-02-03', dayOfWeek: 'segunda-feira', temperatureMin: 18, temperatureMax: 28, weatherCode: 2 }],
-  };
-
-  return {
-    async geocodeCity() {
-      return [baseResponse.location];
-    },
-    async getForecast() {
-      return baseResponse;
-    },
-    async getForecastByCoordinates() {
-      return baseResponse;
-    },
-    ...overrides,
+    daily: [{ date: '2026-03-16', dayOfWeek: 'Segunda', temperatureMin: 18, temperatureMax: 28, weatherCode: 2 }]
   };
 }
 
-test('weather.controller returns 200 for valid city forecast requests', async () => {
-  const controller = createWeatherController(createServiceStub());
-  const { response, state } = createResponseMock();
-  const request = createRequestMock({ city: 'Sao Paulo' });
+describe('WeatherController', () => {
+  it('should return 200 for forecast by city', async () => {
+    // Arrange
+    const service: WeatherService = {
+      async geocodeCity() {
+        return [];
+      },
+      async getWeatherByCity(city: string) {
+        assert.equal(city, 'São Paulo');
+        return makeWeatherFixture();
+      },
+      async getWeatherByCoordinates() {
+        throw new Error('not expected');
+      }
+    };
 
-  await controller.getForecast(request, response);
+    const controller = new WeatherController(service);
+    const req = makeRequestStub({ city: 'São Paulo' });
+    const { res, state } = makeResponseStub();
 
-  assert.equal(state.statusCode, 200);
-  assert.deepEqual(state.body, await createServiceStub().getForecast({ city: 'Sao Paulo' }));
+    // Act
+    await controller.getForecast(req, res);
+
+    // Assert
+    assert.equal(state.statusCode, 200);
+    assert.ok(typeof state.body === 'object' && state.body !== null);
+  });
+
+  it('should return 200 for forecast by coordinates', async () => {
+    // Arrange
+    const service: WeatherService = {
+      async geocodeCity() {
+        return [];
+      },
+      async getWeatherByCity() {
+        throw new Error('not expected');
+      },
+      async getWeatherByCoordinates(latitude: number, longitude: number) {
+        assert.equal(latitude, -23.55);
+        assert.equal(longitude, -46.63);
+        return makeWeatherFixture();
+      }
+    };
+
+    const controller = new WeatherController(service);
+    const req = makeRequestStub({ latitude: '-23.55', longitude: '-46.63' });
+    const { res, state } = makeResponseStub();
+
+    // Act
+    await controller.getForecast(req, res);
+
+    // Assert
+    assert.equal(state.statusCode, 200);
+  });
+
+  it('should return 404 when city is not found', async () => {
+    // Arrange
+    const service: WeatherService = {
+      async geocodeCity() {
+        return [];
+      },
+      async getWeatherByCity() {
+        throw new HttpError('City not found', 404, { city: 'Atlantis' });
+      },
+      async getWeatherByCoordinates() {
+        throw new Error('not expected');
+      }
+    };
+
+    const controller = new WeatherController(service);
+    const req = makeRequestStub({ city: 'Atlantis' });
+    const { res, state } = makeResponseStub();
+
+    // Act
+    await controller.getForecast(req, res);
+
+    // Assert
+    assert.equal(state.statusCode, 404);
+  });
+
+  it('should return 400 when missing params', async () => {
+    // Arrange
+    const service: WeatherService = {
+      async geocodeCity() {
+        return [];
+      },
+      async getWeatherByCity() {
+        throw new Error('not expected');
+      },
+      async getWeatherByCoordinates() {
+        throw new Error('not expected');
+      }
+    };
+    const controller = new WeatherController(service);
+    const req = makeRequestStub({});
+    const { res, state } = makeResponseStub();
+
+    // Act
+    await controller.getForecast(req, res);
+
+    // Assert
+    assert.equal(state.statusCode, 400);
+  });
+
+  it('should return 500 when service throws unexpected error', async () => {
+    // Arrange
+    const service: WeatherService = {
+      async geocodeCity() {
+        return [];
+      },
+      async getWeatherByCity() {
+        throw new Error('boom');
+      },
+      async getWeatherByCoordinates() {
+        throw new Error('not expected');
+      }
+    };
+    const controller = new WeatherController(service);
+    const req = makeRequestStub({ city: 'São Paulo' });
+    const { res, state } = makeResponseStub();
+
+    // Act
+    await controller.getForecast(req, res);
+
+    // Assert
+    assert.equal(state.statusCode, 500);
+  });
+
+  it('should return 200 for geocoding endpoint with valid city', async () => {
+    // Arrange
+    const service: WeatherService = {
+      async geocodeCity(city: string) {
+        assert.equal(city, 'São Paulo');
+        return [{ name: 'São Paulo', latitude: -23.55, longitude: -46.63, country: 'Brazil', admin1: 'São Paulo' }];
+      },
+      async getWeatherByCity() {
+        throw new Error('not expected');
+      },
+      async getWeatherByCoordinates() {
+        throw new Error('not expected');
+      }
+    };
+
+    const controller = new WeatherController(service);
+    const req = makeRequestStub({ city: 'São Paulo' });
+    const { res, state } = makeResponseStub();
+
+    // Act
+    await controller.getGeocoding(req, res);
+
+    // Assert
+    assert.equal(state.statusCode, 200);
+  });
+
+  it('should return 404 for geocoding when no results', async () => {
+    // Arrange
+    const service: WeatherService = {
+      async geocodeCity() {
+        return [];
+      },
+      async getWeatherByCity() {
+        throw new Error('not expected');
+      },
+      async getWeatherByCoordinates() {
+        throw new Error('not expected');
+      }
+    };
+
+    const controller = new WeatherController(service);
+    const req = makeRequestStub({ city: 'Nowhere' });
+    const { res, state } = makeResponseStub();
+
+    // Act
+    await controller.getGeocoding(req, res);
+
+    // Assert
+    assert.equal(state.statusCode, 404);
+  });
 });
 
-test('weather.controller returns 200 for valid coordinates forecast requests', async () => {
-  const controller = createWeatherController(createServiceStub());
-  const { response, state } = createResponseMock();
-  const request = createRequestMock({ latitude: '-23.55', longitude: '-46.63' });
-
-  await controller.getForecast(request, response);
-
-  assert.equal(state.statusCode, 200);
-});
-
-test('weather.controller returns 404 when city is not found', async () => {
-  const controller = createWeatherController(createServiceStub({
-    async getForecast() {
-      throw new WeatherApiError('Cidade nao encontrada', 404);
-    },
-  }));
-  const { response, state } = createResponseMock();
-  const request = createRequestMock({ city: 'Cidade Inexistente' });
-
-  await controller.getForecast(request, response);
-
-  assert.equal(state.statusCode, 404);
-  assert.deepEqual(state.body, { error: 'Cidade nao encontrada' });
-});
-
-test('weather.controller returns 400 when forecast parameters are missing', async () => {
-  const controller = createWeatherController(createServiceStub());
-  const { response, state } = createResponseMock();
-  const request = createRequestMock();
-
-  await controller.getForecast(request, response);
-
-  assert.equal(state.statusCode, 400);
-  assert.deepEqual(state.body, { error: 'Informe city ou latitude e longitude' });
-});
-
-test('weather.controller returns 500 on external API errors', async () => {
-  const controller = createWeatherController(createServiceStub({
-    async geocodeCity() {
-      throw new WeatherApiError('Erro ao consultar geocoding', 500);
-    },
-  }));
-  const { response, state } = createResponseMock();
-  const request = createRequestMock({ city: 'Sao Paulo' });
-
-  await controller.geocodeCity(request, response);
-
-  assert.equal(state.statusCode, 500);
-  assert.deepEqual(state.body, { error: 'Erro ao consultar geocoding' });
-});

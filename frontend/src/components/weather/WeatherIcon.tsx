@@ -1,18 +1,42 @@
-import { cn } from '@/lib/utils';
-import { getWeatherVisual } from './weather.utils';
+import * as React from 'react';
+import {
+  Cloud,
+  CloudDrizzle,
+  CloudFog,
+  CloudLightning,
+  CloudRain,
+  CloudSun,
+  Snowflake,
+  Sun,
+  type LucideIcon,
+} from 'lucide-react';
+import { getWmoMeta } from './weather.utils';
 
-interface WeatherIconProps {
+const ICONS: Record<string, LucideIcon> = {
+  Sun,
+  CloudSun,
+  Cloud,
+  CloudFog,
+  CloudDrizzle,
+  CloudRain,
+  Snowflake,
+  CloudLightning,
+};
+
+export function WeatherIcon({
+  weatherCode,
+  size = 20,
+  className,
+}: {
   weatherCode: number;
   size?: number;
   className?: string;
+}) {
+  const meta = getWmoMeta(weatherCode);
+  const Icon = ICONS[meta.icon] ?? Cloud;
+
+  return <Icon aria-label={meta.description} className={className} size={size} />;
 }
 
-export function WeatherIcon({ weatherCode, size = 24, className }: WeatherIconProps) {
-  const { icon: Icon, iconName, accent } = getWeatherVisual(weatherCode);
+export const WeatherIconMemo = React.memo(WeatherIcon);
 
-  return (
-    <span data-testid={`weather-icon-${iconName}`} className={cn('inline-flex', accent, className)}>
-      <Icon aria-hidden="true" size={size} strokeWidth={1.75} />
-    </span>
-  );
-}

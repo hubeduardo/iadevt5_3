@@ -1,36 +1,38 @@
-import { HourlyForecast as HourlyForecastItem } from './weather.types';
-import { formatTemperature } from './weather.utils';
+import { cn } from '@/lib/utils';
+import type { HourlyForecast as HourlyForecastType } from './weather.types';
 import { WeatherIcon } from './WeatherIcon';
+import { formatTemperature } from './weather.utils';
 
-interface HourlyForecastProps {
-  data: HourlyForecastItem[];
-}
-
-export function HourlyForecast({ data }: HourlyForecastProps) {
+export function HourlyForecast({ data, className }: { data: HourlyForecastType[]; className?: string }) {
   return (
-    <section className="rounded-[2rem] border border-white/40 bg-white/20 p-5 shadow-[0_20px_70px_rgba(76,108,148,0.14)] backdrop-blur-xl">
-      <div className="mb-4 flex items-center justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-500">24 Horas</p>
-          <h2 className="mt-1 text-2xl font-semibold text-slate-900">Previsao horaria</h2>
-        </div>
-        <span className="text-sm text-slate-500">Deslize para ver as proximas horas</span>
+    <section
+      className={cn(
+        'rounded-3xl border border-white/20 bg-white/20 p-5 shadow-sm backdrop-blur-md',
+        className
+      )}
+    >
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-medium text-foreground/80">Próximas 24 horas</h2>
+        <div className="text-xs text-foreground/60">Arraste para navegar</div>
       </div>
-
-      <div className="flex gap-3 overflow-x-auto pb-2" data-testid="hourly-scroll">
+      <div
+        className="flex gap-3 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        aria-label="Previsão horária"
+      >
         {data.slice(0, 24).map((item) => (
-          <article
-            key={`${item.time}-${item.temperature}`}
-            className="min-w-[108px] rounded-[1.5rem] border border-white/45 bg-white/45 p-4 text-center shadow-sm"
+          <div
+            key={item.time}
+            className="min-w-[86px] rounded-2xl border border-white/10 bg-white/10 px-3 py-3 text-center"
           >
-            <p className="text-sm font-medium text-slate-500">{item.time}</p>
-            <div className="my-3 flex justify-center">
-              <WeatherIcon weatherCode={item.weatherCode} size={28} />
+            <div className="text-xs text-foreground/70">{item.time}</div>
+            <div className="mt-2 flex justify-center">
+              <WeatherIcon weatherCode={item.weatherCode} size={18} className="text-foreground/80" />
             </div>
-            <p className="text-lg font-semibold text-slate-900">{formatTemperature(item.temperature)}</p>
-          </article>
+            <div className="mt-2 text-sm font-medium">{formatTemperature(item.temperature)}</div>
+          </div>
         ))}
       </div>
     </section>
   );
 }
+

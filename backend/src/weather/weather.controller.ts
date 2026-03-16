@@ -1,76 +1,104 @@
 import { Request, Response } from 'express';
-import { WeatherApiError, WeatherService } from './weather.types';
-import { weatherService } from './weather.service';
+import { HttpError, WeatherService } from './weather.types';
 
-interface WeatherController {
-  getForecast(req: Request, res: Response): Promise<void>;
-  geocodeCity(req: Request, res: Response): Promise<void>;
-}
-
-function parseCoordinate(value: unknown): number | undefined {
-  if (typeof value !== 'string' || value.trim() === '') {
-    return undefined;
-  }
-
+function parseNumber(value: string): number {
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : Number.NaN;
-}
-
-function handleError(error: unknown, res: Response): void {
-  if (error instanceof WeatherApiError) {
-    res.status(error.statusCode).json({ error: error.message });
-    return;
+  if (!Number.isFinite(parsed)) {
+    throw new HttpError('Invalid number parameter', 400, { value });
   }
-
-  res.status(500).json({ error: 'Erro interno do servidor' });
+  return parsed;
 }
 
-export function createWeatherController(service: WeatherService = weatherService): WeatherController {
-  return {
-    async getForecast(req: Request, res: Response): Promise<void> {
-      try {
-        const city = typeof req.query.city === 'string' ? req.query.city.trim() : undefined;
-        const latitude = parseCoordinate(req.query.latitude);
-        const longitude = parseCoordinate(req.query.longitude);
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
 
-        if (city) {
-          const forecast = await service.getForecast({ city });
-          res.status(200).json(forecast);
-          return;
-        }
+export class WeatherController {
+  constructor(private readonly weatherService: WeatherService) {}
 
-        if (latitude === undefined || longitude === undefined) {
-          res.status(400).json({ error: 'Informe city ou latitude e longitude' });
-          return;
-        }
-
-        if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
-          res.status(400).json({ error: 'Latitude e longitude devem ser numeros validos' });
-          return;
-        }
-
-        const forecast = await service.getForecast({ latitude, longitude });
-        res.status(200).json(forecast);
-      } catch (error) {
-        handleError(error, res);
+  public getGeocoding = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const city = req.query.city;
+      if (!isNonEmptyString(city)) {
+        res.status(400).json({ error: 'Missing required query param: city' });
+        return;
       }
-    },
 
-    async geocodeCity(req: Request, res: Response): Promise<void> {
-      try {
-        const city = typeof req.query.city === 'string' ? req.query.city.trim() : '';
-        if (!city) {
-          res.status(400).json({ error: 'Parametro city e obrigatorio' });
-          return;
-        }
-
-        const results = await service.geocodeCity(city);
-        res.status(200).json({ results });
-      } catch (error) {
-        handleError(error, res);
+      const results = await this.weatherService.geocodeCity(city);
+      if (results.length === 0) {
+        res.status(404).json({ error: 'City not found', city });
+        return;
       }
-    },
+
+      res.status(200).json({ results });
+    } catch (error) {
+      this.handleError(error, req, res);
+    }
   };
+
+  public getForecast = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const city = req.query.city;
+      const latitude = req.query.latitude;
+      const longitude = req.query.longitude;
+
+      const hasCity = isNonEmptyString(city);
+      const hasAnyCoord = typeof latitude !== 'undefined' || typeof longitude !== 'undefined';
+      const hasBothCoord = typeof latitude !== 'undefined' && typeof longitude !== 'undefined';
+
+      if (hasCity && hasAnyCoord) {
+        res.status(400).json({ error: 'Provide either city or latitude/longitude, not both' });
+        return;
+      }
+
+      if (hasCity) {
+        console.log('Forecast requested (by city)', { city });
+        const data = await this.weatherService.getWeatherByCity(city);
+        res.status(200).json(data);
+        return;
+      }
+
+      if (!hasBothCoord) {
+        res.status(400).json({
+          error: 'Missing query params. Provide city or both latitude and longitude'
+        });
+        return;
+      }
+
+      if (!isNonEmptyString(latitude) || !isNonEmptyString(longitude)) {
+        res.status(400).json({ error: 'Invalid latitude/longitude' });
+        return;
+      }
+
+      const lat = parseNumber(latitude);
+      const lon = parseNumber(longitude);
+
+      console.log('Forecast requested (by coordinates)', { latitude: lat, longitude: lon });
+      const data = await this.weatherService.getWeatherByCoordinates(lat, lon);
+      res.status(200).json(data);
+    } catch (error) {
+      this.handleError(error, req, res);
+    }
+  };
+
+  private handleError(error: unknown, req: Request, res: Response): void {
+    void req;
+
+    if (error instanceof HttpError) {
+      if (error.statusCode >= 500) {
+        console.error('Weather controller error', { statusCode: error.statusCode, details: error.details });
+      }
+      res.status(error.statusCode).json({
+        error: error.message,
+        details: error.details
+      });
+      return;
+    }
+
+    console.error('Unexpected weather controller error', { error });
+    res.status(500).json({
+      error: 'Internal server error'
+    });
+  }
 }
 
-export const weatherController = createWeatherController();

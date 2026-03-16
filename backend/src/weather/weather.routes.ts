@@ -1,9 +1,14 @@
 import { Router } from 'express';
-import { weatherController } from './weather.controller';
+import { WeatherController } from './weather.controller';
+import { OpenMeteoWeatherService } from './weather.service';
 
-const weatherRouter = Router();
+const router = Router();
 
-weatherRouter.get('/forecast', (req, res) => weatherController.getForecast(req, res));
-weatherRouter.get('/geocoding', (req, res) => weatherController.geocodeCity(req, res));
+const weatherService = new OpenMeteoWeatherService();
+const weatherController = new WeatherController(weatherService);
 
-export default weatherRouter;
+router.get('/forecast', weatherController.getForecast);
+router.get('/geocoding', weatherController.getGeocoding);
+
+export default router;
+

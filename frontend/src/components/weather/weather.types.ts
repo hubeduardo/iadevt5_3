@@ -8,13 +8,13 @@ export interface CurrentWeather {
 }
 
 export interface HourlyForecast {
-  time: string;
+  time: string; // "HH:mm"
   temperature: number;
   weatherCode: number;
 }
 
 export interface DailyForecast {
-  date: string;
+  date: string; // "YYYY-MM-DD"
   dayOfWeek: string;
   temperatureMin: number;
   temperatureMax: number;
@@ -35,7 +35,11 @@ export interface WeatherData {
   daily: DailyForecast[];
 }
 
-export interface Coordinates {
+export interface GeocodingResult {
+  name: string;
   latitude: number;
   longitude: number;
+  country: string;
+  admin1?: string;
 }
+

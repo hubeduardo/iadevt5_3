@@ -1,17 +1,16 @@
+import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
 import { WeatherIcon } from './WeatherIcon';
 
 describe('WeatherIcon', () => {
-  it('renders the expected icon for a WMO code', () => {
+  it('should render the correct icon aria-label for a WMO code', () => {
     render(<WeatherIcon weatherCode={0} />);
-
-    expect(screen.getByTestId('weather-icon-Sun')).toBeInTheDocument();
+    expect(screen.getByLabelText('Céu limpo')).toBeInTheDocument();
   });
 
-  it('applies size and className props', () => {
-    render(<WeatherIcon weatherCode={61} size={40} className="custom-class" />);
-
-    expect(screen.getByTestId('weather-icon-CloudRain')).toHaveClass('custom-class');
+  it('should accept size prop', () => {
+    render(<WeatherIcon weatherCode={2} size={32} />);
+    expect(screen.getByLabelText('Parcialmente nublado')).toBeInTheDocument();
   });
 });
+

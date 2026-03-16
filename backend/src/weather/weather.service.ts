@@ -1,21 +1,22 @@
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import {
-  ForecastApiResponse,
-  GeocodingApiResponse,
   GeocodingResult,
-  HttpClient,
-  WeatherApiError,
-  WeatherRequest,
+  HttpError,
+  OpenMeteoForecastApiResponse,
+  OpenMeteoGeocodingApiResponse,
   WeatherResponse,
-  WeatherService,
+  WeatherService
 } from './weather.types';
 
 const GEOCODING_URL = 'https://geocoding-api.open-meteo.com/v1/search';
+// Not part of the task's explicit requirements, but helps returning city/country for lat/lon requests.
+const REVERSE_GEOCODING_URL = 'https://geocoding-api.open-meteo.com/v1/reverse';
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
-const TIMEOUT_MS = 10000;
 
-const WEATHER_DESCRIPTIONS: Record<number, string> = {
-  0: 'Ceu limpo',
+const DEFAULT_TIMEOUT_MS = 10_000;
+
+const WMO_DESCRIPTIONS: Record<number, string> = {
+  0: 'Céu limpo',
   1: 'Principalmente limpo',
   2: 'Parcialmente nublado',
   3: 'Nublado',
@@ -32,157 +33,198 @@ const WEATHER_DESCRIPTIONS: Record<number, string> = {
   75: 'Neve forte',
   95: 'Tempestade',
   96: 'Tempestade com granizo',
-  99: 'Tempestade com granizo forte',
+  99: 'Tempestade com granizo forte'
 };
 
-const defaultHttpClient: HttpClient = {
-  get<T>(url: string, config?: { params?: Record<string, string | number> }) {
-    return axios.get<T>(url, { ...config, timeout: TIMEOUT_MS });
-  },
-};
-
-function getWeatherDescription(code: number): string {
-  return WEATHER_DESCRIPTIONS[code] ?? 'Condicao desconhecida';
+function getWeatherDescription(weatherCode: number): string {
+  return WMO_DESCRIPTIONS[weatherCode] ?? 'Condição desconhecida';
 }
 
-function getDayOfWeek(date: string): string {
-  return new Intl.DateTimeFormat('pt-BR', { weekday: 'long', timeZone: 'UTC' }).format(new Date(date));
+function round(value: number): number {
+  return Math.round(value);
 }
 
-function logError(context: Record<string, string | number>, error: unknown): void {
-  const message = error instanceof Error ? error.message : 'Unexpected error';
-  console.error(JSON.stringify({ scope: 'weather.service', ...context, message }));
+function safeGetFirst<T>(arr: T[] | undefined): T | undefined {
+  if (!arr || arr.length === 0) return undefined;
+  return arr[0];
 }
 
-function toWeatherResponse(
-  forecast: ForecastApiResponse,
-  location: GeocodingResult
-): WeatherResponse {
-  if (!forecast.current || !forecast.hourly || !forecast.daily) {
-    throw new WeatherApiError('Resposta incompleta da API de clima', 500);
+function formatHour(timeIsoLike: string): string {
+  // Open-Meteo returns e.g. "2026-03-16T14:00"
+  const timePart = timeIsoLike.split('T')[1];
+  if (!timePart) return timeIsoLike;
+  return timePart.slice(0, 5);
+}
+
+function formatDayOfWeek(dateStr: string): string {
+  // Expect "YYYY-MM-DD"
+  const date = new Date(`${dateStr}T00:00:00`);
+  // Keep it in pt-BR for UI consistency with the PRD examples.
+  const raw = new Intl.DateTimeFormat('pt-BR', { weekday: 'long' }).format(date);
+  return raw.length > 0 ? raw[0].toUpperCase() + raw.slice(1) : raw;
+}
+
+function mapAxiosErrorToHttpError(error: unknown, context: Record<string, unknown>): HttpError {
+  if (error instanceof AxiosError) {
+    const status = error.response?.status;
+    const data = error.response?.data;
+    return new HttpError('External API error', 500, {
+      ...context,
+      status,
+      data
+    });
+  }
+  return new HttpError('Unexpected error', 500, context);
+}
+
+export class OpenMeteoWeatherService implements WeatherService {
+  public async geocodeCity(city: string): Promise<GeocodingResult[]> {
+    const startedAt = Date.now();
+    console.log('Geocoding requested', { city });
+
+    try {
+      const response = await axios.get<OpenMeteoGeocodingApiResponse>(GEOCODING_URL, {
+        params: { name: city, count: 5, language: 'pt' },
+        timeout: DEFAULT_TIMEOUT_MS
+      });
+
+      console.log('Geocoding response received', {
+        city,
+        durationMs: Date.now() - startedAt,
+        resultsCount: response.data.results?.length ?? 0
+      });
+
+      const results = response.data.results ?? [];
+      return results.map((r) => ({
+        name: r.name,
+        latitude: r.latitude,
+        longitude: r.longitude,
+        country: r.country,
+        admin1: r.admin1
+      }));
+    } catch (error) {
+      console.error('Geocoding failed', { city, error });
+      throw mapAxiosErrorToHttpError(error, { endpoint: 'geocoding', city });
+    }
   }
 
-  return {
-    location: {
-      name: location.name,
-      country: location.country,
-      latitude: location.latitude,
-      longitude: location.longitude,
-    },
-    current: {
-      temperature: forecast.current.temperature_2m,
-      feelsLike: forecast.current.apparent_temperature,
-      humidity: forecast.current.relative_humidity_2m,
-      windSpeed: forecast.current.wind_speed_10m,
-      weatherCode: forecast.current.weather_code,
-      weatherDescription: getWeatherDescription(forecast.current.weather_code),
-    },
-    hourly: forecast.hourly.time.slice(0, 24).map((time, index) => ({
-      time: new Intl.DateTimeFormat('pt-BR', {
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZone: 'UTC',
-      }).format(new Date(time)),
-      temperature: forecast.hourly!.temperature_2m[index],
-      weatherCode: forecast.hourly!.weather_code[index],
-    })),
-    daily: forecast.daily.time.slice(0, 7).map((date, index) => ({
-      date,
-      dayOfWeek: getDayOfWeek(date),
-      temperatureMin: forecast.daily!.temperature_2m_min[index],
-      temperatureMax: forecast.daily!.temperature_2m_max[index],
-      weatherCode: forecast.daily!.weather_code[index],
-    })),
-  };
-}
+  public async getWeatherByCity(city: string): Promise<WeatherResponse> {
+    const results = await this.geocodeCity(city);
+    const first = safeGetFirst(results);
+    if (!first) {
+      throw new HttpError('City not found', 404, { city });
+    }
 
-function normalizeGeocodingResults(response: GeocodingApiResponse): GeocodingResult[] {
-  return (response.results ?? []).map((result) => ({
-    name: result.name,
-    latitude: result.latitude,
-    longitude: result.longitude,
-    country: result.country,
-    admin1: result.admin1,
-  }));
-}
+    const forecast = await this.fetchForecast(first.latitude, first.longitude);
+    return this.formatWeatherResponse(forecast, {
+      name: first.name,
+      country: first.country,
+      latitude: first.latitude,
+      longitude: first.longitude
+    });
+  }
 
-export function createWeatherService(httpClient: HttpClient = defaultHttpClient): WeatherService {
-  return {
-    async geocodeCity(city: string): Promise<GeocodingResult[]> {
-      try {
-        const { data } = await httpClient.get<GeocodingApiResponse>(GEOCODING_URL, {
-          params: {
-            name: city,
-            count: 5,
-            language: 'pt',
-          },
-        });
+  public async getWeatherByCoordinates(latitude: number, longitude: number): Promise<WeatherResponse> {
+    const location = await this.tryReverseGeocode(latitude, longitude);
+    const forecast = await this.fetchForecast(latitude, longitude);
 
-        const results = normalizeGeocodingResults(data);
-        if (results.length === 0) {
-          throw new WeatherApiError('Cidade nao encontrada', 404);
-        }
+    return this.formatWeatherResponse(forecast, {
+      name: location?.name ?? `Latitude ${latitude}, Longitude ${longitude}`,
+      country: location?.country ?? '',
+      latitude,
+      longitude
+    });
+  }
 
-        return results;
-      } catch (error) {
-        logError({ city }, error);
-        if (error instanceof WeatherApiError) {
-          throw error;
-        }
+  private async tryReverseGeocode(
+    latitude: number,
+    longitude: number
+  ): Promise<{ name: string; country: string } | undefined> {
+    try {
+      const response = await axios.get<OpenMeteoGeocodingApiResponse>(REVERSE_GEOCODING_URL, {
+        params: { latitude, longitude, count: 1, language: 'pt' },
+        timeout: DEFAULT_TIMEOUT_MS
+      });
+      const first = safeGetFirst(response.data.results);
+      if (!first) return undefined;
+      return { name: first.name, country: first.country };
+    } catch (error) {
+      // Non-blocking: reverse geocoding is just for UX (city/country label).
+      console.error('Reverse geocoding failed', { latitude, longitude, error });
+      return undefined;
+    }
+  }
 
-        throw new WeatherApiError('Erro ao consultar geocoding', 500);
-      }
-    },
+  private async fetchForecast(latitude: number, longitude: number): Promise<OpenMeteoForecastApiResponse> {
+    const startedAt = Date.now();
+    console.log('Weather forecast requested', { latitude, longitude });
 
-    async getForecastByCoordinates(
-      latitude: number,
-      longitude: number,
-      location?: GeocodingResult
-    ): Promise<WeatherResponse> {
-      try {
-        const { data } = await httpClient.get<ForecastApiResponse>(FORECAST_URL, {
-          params: {
-            latitude,
-            longitude,
-            current: 'temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m',
-            hourly: 'temperature_2m,weather_code',
-            daily: 'temperature_2m_max,temperature_2m_min,weather_code',
-            timezone: 'auto',
-            forecast_days: 7,
-          },
-        });
-
-        const resolvedLocation: GeocodingResult = location ?? {
-          name: 'Coordenadas informadas',
-          country: 'N/A',
+    try {
+      const response = await axios.get<OpenMeteoForecastApiResponse>(FORECAST_URL, {
+        params: {
           latitude,
           longitude,
-        };
+          timezone: 'auto',
+          forecast_days: 7,
+          wind_speed_unit: 'kmh',
+          current:
+            'temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m',
+          hourly:
+            'temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m',
+          daily: 'temperature_2m_max,temperature_2m_min,weather_code'
+        },
+        timeout: DEFAULT_TIMEOUT_MS
+      });
 
-        return toWeatherResponse(data, resolvedLocation);
-      } catch (error) {
-        logError({ latitude, longitude }, error);
-        if (error instanceof WeatherApiError) {
-          throw error;
-        }
+      console.log('Open-Meteo forecast response received', {
+        latitude,
+        longitude,
+        durationMs: Date.now() - startedAt,
+        timezone: response.data.timezone
+      });
 
-        throw new WeatherApiError('Erro ao consultar previsao do tempo', 500);
-      }
-    },
+      return response.data;
+    } catch (error) {
+      console.error('Open-Meteo forecast failed', { latitude, longitude, error });
+      throw mapAxiosErrorToHttpError(error, { endpoint: 'forecast', latitude, longitude });
+    }
+  }
 
-    async getForecast(input: WeatherRequest): Promise<WeatherResponse> {
-      if (input.city) {
-        const [location] = await this.geocodeCity(input.city);
-        return this.getForecastByCoordinates(location.latitude, location.longitude, location);
-      }
+  private formatWeatherResponse(
+    forecast: OpenMeteoForecastApiResponse,
+    location: { name: string; country: string; latitude: number; longitude: number }
+  ): WeatherResponse {
+    const current = forecast.current;
+    const hourly = forecast.hourly;
+    const daily = forecast.daily;
 
-      if (typeof input.latitude === 'number' && typeof input.longitude === 'number') {
-        return this.getForecastByCoordinates(input.latitude, input.longitude);
-      }
+    const hourlyItems = hourly.time.slice(0, 24).map((t, i) => ({
+      time: formatHour(t),
+      temperature: round(hourly.temperature_2m[i] ?? 0),
+      weatherCode: hourly.weather_code[i] ?? 0
+    }));
 
-      throw new WeatherApiError('Informe cidade ou latitude/longitude', 400);
-    },
-  };
+    const dailyItems = daily.time.slice(0, 7).map((d, i) => ({
+      date: d,
+      dayOfWeek: formatDayOfWeek(d),
+      temperatureMin: round(daily.temperature_2m_min[i] ?? 0),
+      temperatureMax: round(daily.temperature_2m_max[i] ?? 0),
+      weatherCode: daily.weather_code[i] ?? 0
+    }));
+
+    return {
+      location,
+      current: {
+        temperature: round(current.temperature_2m),
+        feelsLike: round(current.apparent_temperature),
+        humidity: round(current.relative_humidity_2m),
+        windSpeed: round(current.wind_speed_10m),
+        weatherCode: current.weather_code,
+        weatherDescription: getWeatherDescription(current.weather_code)
+      },
+      hourly: hourlyItems,
+      daily: dailyItems
+    };
+  }
 }
 
-export const weatherService = createWeatherService();

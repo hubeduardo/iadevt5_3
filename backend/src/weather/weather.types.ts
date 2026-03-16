@@ -12,6 +12,13 @@ export interface GeocodingResult {
   admin1?: string;
 }
 
+export interface WeatherResponseLocation {
+  name: string;
+  country: string;
+  latitude: number;
+  longitude: number;
+}
+
 export interface CurrentWeather {
   temperature: number;
   feelsLike: number;
@@ -35,75 +42,73 @@ export interface DailyForecast {
   weatherCode: number;
 }
 
-export interface WeatherLocation {
-  name: string;
-  country: string;
-  latitude: number;
-  longitude: number;
-}
-
 export interface WeatherResponse {
-  location: WeatherLocation;
+  location: WeatherResponseLocation;
   current: CurrentWeather;
   hourly: HourlyForecast[];
   daily: DailyForecast[];
 }
 
-export interface GeocodingApiResponse {
-  results?: Array<{
-    name: string;
-    latitude: number;
-    longitude: number;
-    country: string;
-    admin1?: string;
-  }>;
+// External API shapes (Open-Meteo)
+export interface OpenMeteoGeocodingApiResult {
+  name: string;
+  latitude: number;
+  longitude: number;
+  country: string;
+  admin1?: string;
 }
 
-export interface ForecastApiResponse {
+export interface OpenMeteoGeocodingApiResponse {
+  results?: OpenMeteoGeocodingApiResult[];
+}
+
+export interface OpenMeteoForecastApiCurrent {
+  temperature_2m: number;
+  apparent_temperature: number;
+  relative_humidity_2m: number;
+  wind_speed_10m: number;
+  weather_code: number;
+}
+
+export interface OpenMeteoForecastApiHourly {
+  time: string[];
+  temperature_2m: number[];
+  relative_humidity_2m: number[];
+  apparent_temperature: number[];
+  wind_speed_10m: number[];
+  weather_code: number[];
+}
+
+export interface OpenMeteoForecastApiDaily {
+  time: string[];
+  temperature_2m_max: number[];
+  temperature_2m_min: number[];
+  weather_code: number[];
+}
+
+export interface OpenMeteoForecastApiResponse {
   latitude: number;
   longitude: number;
   timezone: string;
-  current?: {
-    time: string;
-    temperature_2m: number;
-    relative_humidity_2m: number;
-    apparent_temperature: number;
-    weather_code: number;
-    wind_speed_10m: number;
-  };
-  hourly?: {
-    time: string[];
-    temperature_2m: number[];
-    weather_code: number[];
-  };
-  daily?: {
-    time: string[];
-    temperature_2m_max: number[];
-    temperature_2m_min: number[];
-    weather_code: number[];
-  };
-}
-
-export interface HttpClient {
-  get<T>(url: string, config?: { params?: Record<string, string | number> }): Promise<{ data: T }>;
+  current: OpenMeteoForecastApiCurrent;
+  hourly: OpenMeteoForecastApiHourly;
+  daily: OpenMeteoForecastApiDaily;
 }
 
 export interface WeatherService {
   geocodeCity(city: string): Promise<GeocodingResult[]>;
-  getForecastByCoordinates(
-    latitude: number,
-    longitude: number,
-    location?: GeocodingResult
-  ): Promise<WeatherResponse>;
-  getForecast(input: WeatherRequest): Promise<WeatherResponse>;
+  getWeatherByCity(city: string): Promise<WeatherResponse>;
+  getWeatherByCoordinates(latitude: number, longitude: number): Promise<WeatherResponse>;
 }
 
-export class WeatherApiError extends Error {
-  statusCode: number;
+export class HttpError extends Error {
+  public readonly statusCode: number;
+  public readonly details?: unknown;
 
-  constructor(message: string, statusCode: number) {
+  constructor(message: string, statusCode: number, details?: unknown) {
     super(message);
-    this.name = 'WeatherApiError';
     this.statusCode = statusCode;
+    this.details = details;
   }
 }
+
