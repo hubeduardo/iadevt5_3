@@ -1,89 +1,71 @@
-import { useEffect, useRef, useState } from 'react';
-import { Coordinates, WeatherData } from './weather.types';
+import * as React from 'react';
+import type { WeatherData } from './weather.types';
 
-const API_BASE_URL = 'http://localhost:3000/api/weather';
+type Coordinates = {
+  latitude: number;
+  longitude: number;
+};
 
-interface UseWeatherState {
-  data: WeatherData | null;
-  error: string | null;
-  loading: boolean;
-  fetchByCity: (city: string) => Promise<void>;
-  fetchByCoordinates: (latitude: number, longitude: number) => Promise<void>;
+type WeatherError = {
+  message: string;
+  status?: number;
+};
+
+function getApiBaseUrl(): string {
+  const base = import.meta.env.VITE_API_BASE_URL as string | undefined;
+  return base?.replace(/\/+$/, '') ?? '';
 }
 
-interface UseGeolocationState {
-  coordinates: Coordinates | null;
-  error: string | null;
-  loading: boolean;
-  requestPermission: () => void;
-}
-
-async function fetchWeather(query: string): Promise<WeatherData> {
-  const response = await fetch(`${API_BASE_URL}/forecast?${query}`);
-  const payload = (await response.json()) as WeatherData | { error?: string };
+async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(url, { signal });
+  const contentType = response.headers.get('content-type') ?? '';
 
   if (!response.ok) {
-    const message = 'error' in payload && typeof payload.error === 'string'
-      ? payload.error
-      : 'Nao foi possivel obter o clima agora.';
-    throw new Error(message);
-  }
-
-  return payload as WeatherData;
-}
-
-export function useWeather(): UseWeatherState {
-  const [data, setData] = useState<WeatherData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  async function runFetch(query: string): Promise<void> {
-    setLoading(true);
-    setError(null);
-
+    let payload: unknown;
     try {
-      const nextData = await fetchWeather(query);
-      setData(nextData);
-    } catch (caughtError) {
-      setData(null);
-      setError(caughtError instanceof Error ? caughtError.message : 'Erro inesperado');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function fetchByCity(city: string): Promise<void> {
-    const normalizedCity = city.trim();
-    if (!normalizedCity) {
-      setError('Informe uma cidade para buscar.');
-      return;
+      payload = await response.json();
+    } catch {
+      payload = undefined;
     }
 
-    await runFetch(`city=${encodeURIComponent(normalizedCity)}`);
+    throw {
+      message:
+        payload && typeof payload === 'object' && 'error' in payload
+          ? String((payload as Record<string, unknown>).error)
+          : 'Erro ao buscar clima.',
+      status: response.status,
+    } satisfies WeatherError;
   }
 
-  async function fetchByCoordinates(latitude: number, longitude: number): Promise<void> {
-    await runFetch(`latitude=${latitude}&longitude=${longitude}`);
+  if (!contentType.includes('application/json')) {
+    throw {
+      message: 'Backend indisponivel ou configuracao de API invalida.',
+      status: response.status,
+    } satisfies WeatherError;
   }
 
-  return { data, error, loading, fetchByCity, fetchByCoordinates };
+  try {
+    return (await response.json()) as T;
+  } catch {
+    throw {
+      message: 'Resposta invalida da API de clima.',
+      status: response.status,
+    } satisfies WeatherError;
+  }
 }
 
-export function useGeolocation(autoRequest = true): UseGeolocationState {
-  const [coordinates, setCoordinates] = useState<Coordinates | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(autoRequest);
-  const requestedRef = useRef(false);
+export function useGeolocation() {
+  const [coordinates, setCoordinates] = React.useState<Coordinates | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(false);
 
-  function requestPermission(): void {
-    if (!('geolocation' in navigator)) {
-      setLoading(false);
-      setError('Geolocalizacao indisponivel neste navegador.');
+  const requestPermission = React.useCallback(() => {
+    if (!navigator.geolocation) {
+      setError('Geolocalizacao nao suportada neste navegador.');
       return;
     }
 
     setLoading(true);
-    setError(null);
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
@@ -91,27 +73,73 @@ export function useGeolocation(autoRequest = true): UseGeolocationState {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
         });
+        setError(null);
         setLoading(false);
       },
-      () => {
-        setError('Permissao de localizacao negada. Busque por uma cidade.');
+      (geoError) => {
+        setCoordinates(null);
+        setError(geoError.message || 'Permissao de geolocalizacao negada.');
         setLoading(false);
       },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-      }
+      { enableHighAccuracy: false, timeout: 10_000, maximumAge: 60_000 }
     );
-  }
-
-  useEffect(() => {
-    if (!autoRequest || requestedRef.current) {
-      return;
-    }
-
-    requestedRef.current = true;
-    requestPermission();
-  }, [autoRequest]);
+  }, []);
 
   return { coordinates, error, loading, requestPermission };
+}
+
+export function useWeather() {
+  const [data, setData] = React.useState<WeatherData | null>(null);
+  const [error, setError] = React.useState<WeatherError | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const abortRef = React.useRef<AbortController | null>(null);
+
+  const run = React.useCallback(async (url: string) => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const result = await fetchJson<WeatherData>(url, controller.signal);
+      setData(result);
+    } catch (unknownError) {
+      setData(null);
+      if (unknownError && typeof unknownError === 'object' && 'message' in unknownError) {
+        setError(unknownError as WeatherError);
+      } else {
+        setError({ message: 'Erro inesperado.' });
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const fetchByCity = React.useCallback(
+    async (city: string) => {
+      await run(`${getApiBaseUrl()}/api/weather/forecast?city=${encodeURIComponent(city)}`);
+    },
+    [run]
+  );
+
+  const fetchByCoordinates = React.useCallback(
+    async (latitude: number, longitude: number) => {
+      await run(
+        `${getApiBaseUrl()}/api/weather/forecast?latitude=${encodeURIComponent(String(latitude))}&longitude=${encodeURIComponent(
+          String(longitude)
+        )}`
+      );
+    },
+    [run]
+  );
+
+  React.useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  return { data, error, loading, fetchByCity, fetchByCoordinates };
 }

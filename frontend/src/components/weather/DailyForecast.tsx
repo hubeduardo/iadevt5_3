@@ -1,48 +1,38 @@
-import { DailyForecast as DailyForecastItem } from './weather.types';
-import { formatTemperature } from './weather.utils';
+import { cn } from '@/lib/utils';
 import { WeatherIcon } from './WeatherIcon';
+import type { DailyForecast as DailyForecastData } from './weather.types';
+import { formatTemperature, isToday } from './weather.utils';
 
-interface DailyForecastProps {
-  data: DailyForecastItem[];
-}
-
-export function DailyForecast({ data }: DailyForecastProps) {
-  const today = data[0]?.date;
-
+export function DailyForecast({ data, className }: { data: DailyForecastData[]; className?: string }) {
   return (
-    <section className="rounded-[2rem] border border-white/40 bg-white/22 p-5 shadow-[0_20px_70px_rgba(76,108,148,0.14)] backdrop-blur-xl">
-      <p className="text-xs font-semibold uppercase tracking-[0.35em] text-slate-500">7 Dias</p>
-      <h2 className="mt-1 text-2xl font-semibold text-slate-900">Proximos dias</h2>
+    <section className={cn('max-w-full overflow-hidden rounded-3xl border border-white/20 bg-white/20 p-4 shadow-sm backdrop-blur-md sm:p-5', className)}>
+      <h2 className="mb-3 text-sm font-medium text-foreground/80">Proximos 7 dias</h2>
+      <div className="space-y-2" aria-label="Previsao diaria">
+        {data.slice(0, 7).map((day) => {
+          const today = isToday(day);
 
-      <div className="mt-5 space-y-3">
-        {data.slice(0, 7).map((item) => {
-          const isToday = item.date === today;
           return (
-            <article
-              key={item.date}
-              data-testid={isToday ? 'daily-today' : undefined}
-              className={`flex items-center justify-between rounded-[1.4rem] border px-4 py-3 transition ${
-                isToday
-                  ? 'border-slate-900/15 bg-slate-900 text-white shadow-lg'
-                  : 'border-white/45 bg-white/45 text-slate-900'
-              }`}
+            <div
+              key={day.date}
+              className={cn(
+                'flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/10 px-3 py-2.5 sm:px-4 sm:py-3',
+                today && 'border-white/25 bg-white/15'
+              )}
             >
-              <div>
-                <p className={`font-semibold ${isToday ? 'text-white' : 'text-slate-900'}`}>{item.dayOfWeek}</p>
-                <p className={`text-sm ${isToday ? 'text-white/80' : 'text-slate-500'}`}>{item.date}</p>
+              <div className="min-w-0">
+                <div className="text-sm font-medium">{today ? 'Hoje' : day.dayOfWeek}</div>
+                <div className="text-xs text-foreground/60">{day.date}</div>
               </div>
-              <div className="flex items-center gap-4">
-                <WeatherIcon weatherCode={item.weatherCode} className={isToday ? 'text-white' : undefined} />
-                <div className="text-right">
-                  <p className={`font-semibold ${isToday ? 'text-white' : 'text-slate-900'}`}>
-                    {formatTemperature(item.temperatureMax)}
-                  </p>
-                  <p className={`text-sm ${isToday ? 'text-white/80' : 'text-slate-500'}`}>
-                    {formatTemperature(item.temperatureMin)}
-                  </p>
+
+              <div className="flex shrink-0 items-center gap-3">
+                <WeatherIcon weatherCode={day.weatherCode} size={18} className="text-foreground/80" />
+                <div className="text-sm text-foreground/80">
+                  <span className="font-medium">{formatTemperature(day.temperatureMax)}</span>
+                  <span className="mx-1 text-foreground/50">/</span>
+                  <span className="text-foreground/70">{formatTemperature(day.temperatureMin)}</span>
                 </div>
               </div>
-            </article>
+            </div>
           );
         })}
       </div>

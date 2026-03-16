@@ -1,77 +1,80 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
-import { useEffect } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 import { useWeather } from './weather.hooks';
-
-function HookProbe({ onReady }: { onReady: (api: ReturnType<typeof useWeather>) => void }) {
-  const api = useWeather();
-
-  useEffect(() => {
-    onReady(api);
-  }, [api, onReady]);
-
-  return (
-    <div>
-      <span data-testid="loading">{String(api.loading)}</span>
-      <span data-testid="error">{api.error ?? ''}</span>
-      <span data-testid="city">{api.data?.location.name ?? ''}</span>
-    </div>
-  );
-}
+import type { WeatherData } from './weather.types';
 
 describe('useWeather', () => {
-  afterEach(() => {
-    cleanup();
-    vi.restoreAllMocks();
-  });
-
   it('starts with idle state', () => {
-    render(<HookProbe onReady={() => undefined} />);
+    const { result } = renderHook(() => useWeather());
 
-    expect(screen.getByTestId('loading').textContent).toBe('false');
-    expect(screen.getByTestId('error').textContent).toBe('');
-    expect(screen.getByTestId('city').textContent).toBe('');
+    expect(result.current.loading).toBe(false);
+    expect(result.current.data).toBeNull();
+    expect(result.current.error).toBeNull();
   });
 
-  it('loads data successfully by city', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        location: { name: 'Sao Paulo', country: 'Brazil', latitude: -23.55, longitude: -46.63 },
-        current: { temperature: 25, feelsLike: 27, humidity: 65, windSpeed: 12, weatherCode: 2, weatherDescription: 'Parcialmente nublado' },
-        hourly: [],
-        daily: [],
-      }),
-    });
-    vi.stubGlobal('fetch', fetchMock);
+  it('stores data on successful fetch', async () => {
+    const fixture: WeatherData = {
+      location: { name: 'Sao Paulo', country: 'Brazil', latitude: -23.55, longitude: -46.63 },
+      current: {
+        temperature: 25,
+        feelsLike: 27,
+        humidity: 65,
+        windSpeed: 12,
+        weatherCode: 2,
+        weatherDescription: 'Parcialmente nublado',
+      },
+      hourly: [{ time: '14:00', temperature: 25, weatherCode: 2 }],
+      daily: [{ date: '2026-03-16', dayOfWeek: 'Segunda', temperatureMin: 18, temperatureMax: 28, weatherCode: 2 }],
+    };
 
-    let hookApi: ReturnType<typeof useWeather> | null = null;
-    render(<HookProbe onReady={(api) => { hookApi = api; }} />);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        headers: {
+          get: () => 'application/json',
+        },
+        json: async () => fixture,
+      })) as unknown as typeof fetch
+    );
+
+    const { result } = renderHook(() => useWeather());
 
     await act(async () => {
-      await hookApi?.fetchByCity('Sao Paulo');
+      await result.current.fetchByCity('Sao Paulo');
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId('city').textContent).toBe('Sao Paulo');
+      expect(result.current.loading).toBe(false);
+      expect(result.current.data?.location.name).toBe('Sao Paulo');
+      expect(result.current.error).toBeNull();
     });
   });
 
-  it('handles fetch errors', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: false,
-      json: async () => ({ error: 'Cidade nao encontrada' }),
-    }));
+  it('stores error on failed fetch', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: false,
+        status: 404,
+        headers: {
+          get: () => 'application/json',
+        },
+        json: async () => ({ error: 'City not found' }),
+      })) as unknown as typeof fetch
+    );
 
-    let hookApi: ReturnType<typeof useWeather> | null = null;
-    render(<HookProbe onReady={(api) => { hookApi = api; }} />);
+    const { result } = renderHook(() => useWeather());
 
     await act(async () => {
-      await hookApi?.fetchByCity('Cidade Inexistente');
+      await result.current.fetchByCity('Atlantis');
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId('error').textContent).toBe('Cidade nao encontrada');
+      expect(result.current.data).toBeNull();
+      expect(result.current.error?.message).toBe('City not found');
+      expect(result.current.error?.status).toBe(404);
     });
   });
 });

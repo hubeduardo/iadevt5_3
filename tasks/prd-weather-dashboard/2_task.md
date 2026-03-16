@@ -191,6 +191,8 @@ const WMO_CODES: Record<number, { description: string; icon: string; gradient: s
   - `WeatherSearch`: dispara callback ao buscar
 
 <critical>SEMPRE CRIE E EXECUTE OS TESTES DA TAREFA ANTES DE CONSIDERÁ-LA FINALIZADA</critical>
+<critical>VERIFICAR O RESPONSIVO DA PAGINA</critical>
+<critical>VERIFICAR A QUESTÃO DE SCROLL LATERIAL, COMO TEMOS 24H À FRENTE PODE HAVER PROBLEMAS NESSE COMPONENTE</critical>
 
 ## Arquivos relevantes
 

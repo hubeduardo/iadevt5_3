@@ -35,7 +35,10 @@ export interface WeatherData {
   daily: DailyForecast[];
 }
 
-export interface Coordinates {
+export interface GeocodingResult {
+  name: string;
   latitude: number;
   longitude: number;
+  country: string;
+  admin1?: string;
 }

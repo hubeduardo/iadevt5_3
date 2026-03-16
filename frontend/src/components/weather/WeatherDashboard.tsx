@@ -1,112 +1,110 @@
-import { useEffect } from 'react';
-import { AlertCircle, LoaderCircle } from 'lucide-react';
+import * as React from 'react';
+import { AlertTriangle, LocateFixed } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { CurrentWeather } from './CurrentWeather';
 import { DailyForecast } from './DailyForecast';
 import { HourlyForecast } from './HourlyForecast';
 import { WeatherSearch } from './WeatherSearch';
 import { useGeolocation, useWeather } from './weather.hooks';
-import { getBackgroundGradient } from './weather.utils';
+import { getWmoMeta } from './weather.utils';
+
+function LoadingCard({ className }: { className?: string }) {
+  return (
+    <div className={cn('animate-pulse rounded-3xl border border-white/20 bg-white/20 p-4 shadow-sm backdrop-blur-md sm:p-5', className)}>
+      <div className="h-4 w-40 rounded bg-white/30" />
+      <div className="mt-3 h-10 w-28 rounded bg-white/30" />
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
+        <div className="h-14 rounded-2xl bg-white/20" />
+        <div className="h-14 rounded-2xl bg-white/20" />
+        <div className="hidden h-14 rounded-2xl bg-white/20 sm:block" />
+      </div>
+    </div>
+  );
+}
 
 export function WeatherDashboard() {
-  const weather = useWeather();
-  const geolocation = useGeolocation(true);
+  const { coordinates, error: geoError, loading: geoLoading, requestPermission } = useGeolocation();
+  const { data, error, loading, fetchByCity, fetchByCoordinates } = useWeather();
+  const [requestedGeo, setRequestedGeo] = React.useState(false);
 
-  useEffect(() => {
-    if (!geolocation.coordinates) {
-      return;
-    }
+  React.useEffect(() => {
+    if (requestedGeo) return;
+    setRequestedGeo(true);
+    requestPermission();
+  }, [requestedGeo, requestPermission]);
 
-    void weather.fetchByCoordinates(
-      geolocation.coordinates.latitude,
-      geolocation.coordinates.longitude
-    );
-  }, [geolocation.coordinates]);
+  React.useEffect(() => {
+    if (!coordinates) return;
+    void fetchByCoordinates(coordinates.latitude, coordinates.longitude);
+  }, [coordinates, fetchByCoordinates]);
 
-  const helperMessage = geolocation.error ?? 'Permita a localizacao para ver o clima atual automaticamente.';
-  const backgroundClass = weather.data
-    ? getBackgroundGradient(weather.data.current.weatherCode)
-    : 'bg-gradient-to-br from-sky-100 via-white to-blue-200';
+  const backgroundGradient = data
+    ? getWmoMeta(data.current.weatherCode).gradient
+    : 'from-blue-300/40 via-slate-100/40 to-yellow-200/40';
 
   return (
-    <main className={`min-h-screen overflow-hidden px-4 py-6 text-slate-900 transition-colors duration-700 md:px-6 ${backgroundClass}`}>
-      <div className="mx-auto max-w-6xl">
-        <div className="relative overflow-hidden rounded-[2.5rem] border border-white/40 bg-white/15 p-5 shadow-[0_40px_140px_rgba(88,121,164,0.18)] backdrop-blur-2xl md:p-8">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.55),transparent_35%),radial-gradient(circle_at_bottom_right,rgba(125,211,252,0.26),transparent_30%)]" />
+    <main className="min-h-[100svh] overflow-x-hidden px-3 py-4 sm:px-4 sm:py-8">
+      <div className={cn('pointer-events-none fixed inset-0 -z-10 bg-gradient-to-br opacity-80', backgroundGradient)} />
 
-          <div className="relative">
-            <header className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <div className="mx-auto w-full max-w-3xl min-w-0">
+        <header className="mb-4 flex flex-col gap-3 sm:mb-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Weather Dashboard</h1>
+              <p className="text-sm text-foreground/70">Clima atual, proximas 24h e previsao de 7 dias</p>
+            </div>
+
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={requestPermission}
+              disabled={geoLoading}
+              className="w-full rounded-xl sm:w-auto"
+            >
+              <LocateFixed className="mr-1 size-4" />
+              Localizacao
+            </Button>
+          </div>
+
+          <WeatherSearch
+            onSearch={(city) => {
+              void fetchByCity(city);
+            }}
+            loading={loading}
+            hint={geoError ? 'Geolocalizacao indisponivel. Busque por uma cidade para continuar.' : undefined}
+          />
+        </header>
+
+        {error ? (
+          <div className="mb-4 rounded-2xl border border-white/20 bg-white/20 p-4 text-sm text-foreground/80 shadow-sm backdrop-blur-md sm:mb-5">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-foreground/70" />
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.4em] text-slate-500">Weather Dashboard</p>
-                <h1 className="mt-3 max-w-2xl text-4xl font-semibold tracking-tight md:text-6xl">
-                  Clima elegante, em tempo real, sem ruido visual.
-                </h1>
-              </div>
-              <p className="max-w-md text-sm leading-6 text-slate-600">
-                O painel prioriza sua localizacao ao carregar a pagina, mas voce pode alternar de cidade a qualquer momento.
-              </p>
-            </header>
-
-            <div className="grid gap-6 xl:grid-cols-[1.35fr_0.95fr]">
-              <div className="space-y-6">
-                <WeatherSearch
-                  onSearch={(city) => void weather.fetchByCity(city)}
-                  onUseLocation={geolocation.requestPermission}
-                  loading={weather.loading || geolocation.loading}
-                  helperMessage={helperMessage}
-                />
-
-                {weather.error ? (
-                  <div className="rounded-[2rem] border border-red-200/70 bg-white/55 p-5 text-red-700 backdrop-blur-xl">
-                    <div className="flex items-start gap-3">
-                      <AlertCircle className="mt-0.5 h-5 w-5" />
-                      <div>
-                        <p className="font-semibold">Nao foi possivel carregar o clima</p>
-                        <p className="mt-1 text-sm">{weather.error === 'Cidade nao encontrada' ? 'Cidade nao encontrada. Tente um nome mais especifico.' : weather.error}</p>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
-                {weather.loading && !weather.data ? (
-                  <div className="flex min-h-[280px] items-center justify-center rounded-[2rem] border border-white/40 bg-white/25 backdrop-blur-xl">
-                    <div className="flex items-center gap-3 text-slate-600">
-                      <LoaderCircle className="h-5 w-5 animate-spin" />
-                      Carregando previsao...
-                    </div>
-                  </div>
-                ) : null}
-
-                {weather.data ? (
-                  <>
-                    <CurrentWeather data={weather.data.current} location={weather.data.location} />
-                    <HourlyForecast data={weather.data.hourly} />
-                  </>
-                ) : null}
-              </div>
-
-              <div className="space-y-6">
-                <aside className="rounded-[2rem] border border-white/40 bg-slate-950/80 p-6 text-white shadow-[0_20px_70px_rgba(15,23,42,0.28)]">
-                  <p className="text-xs font-semibold uppercase tracking-[0.35em] text-white/60">Modo Automatico</p>
-                  <h2 className="mt-3 text-2xl font-semibold">Abertura inteligente</h2>
-                  <p className="mt-3 text-sm leading-6 text-white/75">
-                    Ao entrar na pagina, o painel tenta obter sua localizacao. Se a permissao for negada ou indisponivel, a busca por cidade permanece disponivel com orientacao clara.
-                  </p>
-                </aside>
-
-                {weather.data ? (
-                  <DailyForecast data={weather.data.daily} />
-                ) : (
-                  <div className="rounded-[2rem] border border-white/40 bg-white/25 p-6 text-slate-700 backdrop-blur-xl">
-                    <p className="text-lg font-semibold">Pronto para uma busca manual</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">
-                      Informe uma cidade para ver o clima atual, as proximas 24 horas e a previsao dos proximos 7 dias.
-                    </p>
-                  </div>
-                )}
+                <div className="font-medium">Nao foi possivel carregar o clima</div>
+                <div className="mt-1 text-foreground/70">{error.message}</div>
               </div>
             </div>
           </div>
-        </div>
+        ) : null}
+
+        {loading && !data ? (
+          <div className="grid gap-3 sm:gap-4">
+            <LoadingCard />
+            <div className="grid gap-3 md:grid-cols-2 sm:gap-4">
+              <LoadingCard />
+              <LoadingCard />
+            </div>
+          </div>
+        ) : null}
+
+        {data ? (
+          <div className="grid min-w-0 gap-3 sm:gap-4">
+            <CurrentWeather data={data.current} location={data.location} />
+            <HourlyForecast data={data.hourly} />
+            <DailyForecast data={data.daily} />
+          </div>
+        ) : null}
       </div>
     </main>
   );
